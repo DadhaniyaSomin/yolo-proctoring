@@ -7,7 +7,7 @@ let workerId = -1;
 
 // YOLO model configuration - adjust based on your specific use case
 const modelConfig = {
-  modelPath: "/models/yolo11n.onnx", // This path is now correct
+  modelPath: "https://yolo-proctoring.vercel.app/models/yolo11n.onnx", // This path is now correct
   inputShape: [1, 3, 640, 640], // Standard YOLO input shape
   confThreshold: 0.5, // Confidence threshold for detections
   iouThreshold: 0.5, // IOU threshold for NMS
