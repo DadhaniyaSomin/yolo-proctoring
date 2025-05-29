@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORS Test for YOLO Model Loading</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .loading {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>CORS Test for YOLO Model Loading</h1>
+    <p>This page tests different methods to load the YOLO model and bypass CORS restrictions.</p>
+
+    <div class="test-section">
+        <h3>Test 1: Direct Fetch (Expected to fail with CORS)</h3>
+        <button onclick="testDirectFetch()">Test Direct Fetch</button>
+        <div id="direct-result"></div>
+        <div id="direct-log" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 2: Fetch with no-cors mode</h3>
+        <button onclick="testNoCors()">Test No-CORS Fetch</button>
+        <div id="nocors-result"></div>
+        <div id="nocors-log" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 3: Using CORS Proxy</h3>
+        <button onclick="testCorsProxy()">Test CORS Proxy</button>
+        <div id="proxy-result"></div>
+        <div id="proxy-log" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 4: Test Worker Model Loading</h3>
+        <button onclick="testWorkerLoading()">Test Worker Model Loading</button>
+        <div id="worker-result"></div>
+        <div id="worker-log" class="log"></div>
+    </div>
+
+    <script>
+        const modelUrl = "https://yolo-proctoring.vercel.app/models/yolo11n.onnx";
+        const testModelUrl = "https://github.com/AK391/models/raw/main/vision/body_analysis/ultraface/models/version-RFB-320.onnx";
+
+        function log(elementId, message) {
+            const logElement = document.getElementById(elementId);
+            logElement.textContent += new Date().toLocaleTimeString() + ": " + message + "\n";
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function setResult(elementId, success, message) {
+            const resultElement = document.getElementById(elementId);
+            resultElement.className = `test-section ${success ? 'success' : 'error'}`;
+            resultElement.innerHTML = `<strong>${success ? 'SUCCESS' : 'FAILED'}:</strong> ${message}`;
+        }
+
+        function setLoading(elementId, message) {
+            const resultElement = document.getElementById(elementId);
+            resultElement.className = 'test-section loading';
+            resultElement.innerHTML = `<strong>LOADING:</strong> ${message}`;
+        }
+
+        async function testDirectFetch() {
+            const resultId = 'direct-result';
+            const logId = 'direct-log';
+
+            setLoading(resultId, 'Testing direct fetch...');
+            log(logId, 'Starting direct fetch test');
+
+            try {
+                log(logId, `Fetching: ${modelUrl}`);
+                const response = await fetch(modelUrl);
+
+                if (response.ok) {
+                    const size = response.headers.get('content-length');
+                    log(logId, `Response OK, size: ${size} bytes`);
+                    setResult(resultId, true, `Model fetched successfully (${size} bytes)`);
+                } else {
+                    log(logId, `Response failed: ${response.status} ${response.statusText}`);
+                    setResult(resultId, false, `HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                log(logId, `CORS Error (Expected): ${error.message}`);
+
+                // Try the test model URL as well
+                try {
+                    log(logId, `Trying test model: ${testModelUrl}`);
+                    const testResponse = await fetch(testModelUrl);
+                    if (testResponse.ok) {
+                        const size = testResponse.headers.get('content-length');
+                        log(logId, `Test model OK, size: ${size} bytes`);
+                        setResult(resultId, true, `Test model fetched successfully (${size} bytes)`);
+                    } else {
+                        setResult(resultId, false, `Both models failed with CORS errors`);
+                    }
+                } catch (testError) {
+                    log(logId, `Test model also failed: ${testError.message}`);
+                    setResult(resultId, false, `CORS Error: ${error.message}`);
+                }
+            }
+        }
+
+        async function testNoCors() {
+            const resultId = 'nocors-result';
+            const logId = 'nocors-log';
+
+            setLoading(resultId, 'Testing no-cors fetch...');
+            log(logId, 'Starting no-cors fetch test');
+
+            try {
+                log(logId, `Fetching with no-cors: ${modelUrl}`);
+                const response = await fetch(modelUrl, { mode: 'no-cors' });
+
+                log(logId, `Response type: ${response.type}`);
+                if (response.type === 'opaque') {
+                    setResult(resultId, true, 'No-CORS fetch successful (opaque response)');
+                } else {
+                    setResult(resultId, false, `Unexpected response type: ${response.type}`);
+                }
+            } catch (error) {
+                log(logId, `Error: ${error.message}`);
+                setResult(resultId, false, error.message);
+            }
+        }
+
+        async function testCorsProxy() {
+            const resultId = 'proxy-result';
+            const logId = 'proxy-log';
+
+            setLoading(resultId, 'Testing CORS proxy...');
+            log(logId, 'Starting CORS proxy test');
+
+            const proxyUrl = `/api/cors-proxy?url=${encodeURIComponent(modelUrl)}`;
+
+            try {
+                log(logId, `Fetching via proxy: ${proxyUrl}`);
+                const response = await fetch(proxyUrl);
+
+                if (response.ok) {
+                    const size = response.headers.get('content-length');
+                    log(logId, `Proxy response OK, size: ${size} bytes`);
+                    setResult(resultId, true, `Model fetched via proxy (${size} bytes)`);
+                } else {
+                    const errorText = await response.text();
+                    log(logId, `Proxy failed: ${response.status} ${errorText}`);
+                    setResult(resultId, false, `Proxy error: ${response.status}`);
+                }
+            } catch (error) {
+                log(logId, `Error: ${error.message}`);
+                setResult(resultId, false, error.message);
+            }
+        }
+
+        async function testWorkerLoading() {
+            const resultId = 'worker-result';
+            const logId = 'worker-log';
+
+            setLoading(resultId, 'Testing worker model loading...');
+            log(logId, 'Starting worker model loading test');
+
+            try {
+                // Create a test worker
+                const worker = new Worker(new URL('/src/workers/yolo-worker.js', import.meta.url), { type: 'module' });
+
+                worker.onmessage = function(event) {
+                    const { taskId, result, error, status, message } = event.data;
+
+                    if (status) {
+                        log(logId, `Worker status: ${status} - ${message || ''}`);
+
+                        if (status === 'ready') {
+                            setResult(resultId, true, 'Worker successfully loaded model');
+                            worker.terminate();
+                        } else if (status === 'error') {
+                            setResult(resultId, false, `Worker error: ${error}`);
+                            worker.terminate();
+                        }
+                    }
+
+                    if (error) {
+                        log(logId, `Worker error: ${error}`);
+                        setResult(resultId, false, error);
+                        worker.terminate();
+                    }
+                };
+
+                worker.onerror = function(error) {
+                    log(logId, `Worker script error: ${error.message}`);
+                    setResult(resultId, false, `Worker script error: ${error.message}`);
+                };
+
+                // Initialize the worker
+                log(logId, 'Sending init message to worker');
+                worker.postMessage({
+                    taskId: 'test-init',
+                    type: 'init',
+                    data: { workerId: 0 }
+                });
+
+            } catch (error) {
+                log(logId, `Error creating worker: ${error.message}`);
+                setResult(resultId, false, error.message);
+            }
+        }
+    </script>
+</body>
+</html>

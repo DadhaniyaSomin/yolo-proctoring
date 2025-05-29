@@ -7,17 +7,16 @@ let workerId = -1;
 
 // YOLO model configuration - adjust based on your specific use case
 const modelConfig = {
-  modelPath: "https://yolo-proctoring.vercel.app/models/yolo11n.onnx", // Primary model URL
+  modelPath: "https://yolo-proctoring.vercel.app/models/yolo11n.onnx", // Your original URL
   fallbackUrls: [
-    // Alternative URLs to try if primary fails
-    "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolo11n.onnx",
-    "https://huggingface.co/Ultralytics/YOLOv8/resolve/main/yolo11n.onnx",
+    // Alternative working URLs (you should replace these with actual working URLs)
+    "https://github.com/AK391/models/raw/main/vision/body_analysis/ultraface/models/version-RFB-320.onnx",
     // Use our own CORS proxy as fallback
     `/api/cors-proxy?url=${encodeURIComponent(
       "https://yolo-proctoring.vercel.app/models/yolo11n.onnx"
     )}`,
-    // External CORS proxy as last resort
-    "https://cors-anywhere.herokuapp.com/https://yolo-proctoring.vercel.app/models/yolo11n.onnx",
+    // Local fallback
+    "./models/yolo11n.onnx",
   ],
   inputShape: [1, 3, 640, 640], // Standard YOLO input shape
   confThreshold: 0.5, // Confidence threshold for detections
