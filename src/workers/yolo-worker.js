@@ -7,7 +7,18 @@ let workerId = -1;
 
 // YOLO model configuration - adjust based on your specific use case
 const modelConfig = {
-  modelPath: "https://yolo-proctoring.vercel.app/models/yolo11n.onnx", // This path is now correct
+  modelPath: "https://yolo-proctoring.vercel.app/models/yolo11n.onnx", // Primary model URL
+  fallbackUrls: [
+    // Alternative URLs to try if primary fails
+    "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolo11n.onnx",
+    "https://huggingface.co/Ultralytics/YOLOv8/resolve/main/yolo11n.onnx",
+    // Use our own CORS proxy as fallback
+    `/api/cors-proxy?url=${encodeURIComponent(
+      "https://yolo-proctoring.vercel.app/models/yolo11n.onnx"
+    )}`,
+    // External CORS proxy as last resort
+    "https://cors-anywhere.herokuapp.com/https://yolo-proctoring.vercel.app/models/yolo11n.onnx",
+  ],
   inputShape: [1, 3, 640, 640], // Standard YOLO input shape
   confThreshold: 0.5, // Confidence threshold for detections
   iouThreshold: 0.5, // IOU threshold for NMS
@@ -26,6 +37,63 @@ const modelConfig = {
   ],
 };
 
+// Helper function to load model with CORS handling
+async function loadModelWithCORS(modelPath) {
+  try {
+    // If it's a URL, try to fetch it with proper CORS handling
+    if (modelPath.startsWith("http")) {
+      postMessage({
+        status: "downloading",
+        message: "Downloading model from remote URL...",
+      });
+
+      const response = await fetch(modelPath, {
+        method: "GET",
+        mode: "cors", // Try CORS first
+        cache: "default",
+        headers: {
+          Accept: "application/octet-stream, */*",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    } else {
+      // For local paths, return the path as-is
+      return modelPath;
+    }
+  } catch (corsError) {
+    console.warn(
+      `CORS failed for ${modelPath}, trying no-cors mode:`,
+      corsError
+    );
+
+    // Fallback: try with no-cors mode
+    try {
+      const response = await fetch(modelPath, {
+        method: "GET",
+        mode: "no-cors",
+        cache: "default",
+      });
+
+      // Note: no-cors mode returns opaque response, so we can't check status
+      // We'll let ONNX handle any errors
+      const arrayBuffer = await response.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    } catch (noCorsError) {
+      console.error(
+        `Both CORS and no-cors failed for ${modelPath}:`,
+        noCorsError
+      );
+      throw new Error(`Failed to fetch model: ${corsError.message}`);
+    }
+  }
+}
+
 // Initialize the YOLO model
 async function initializeModel(params) {
   try {
@@ -38,37 +106,72 @@ async function initializeModel(params) {
       graphOptimizationLevel: "all",
     };
 
-    // Initialize ONNX session with the YOLO model
-    try {
-      session = await onnx.InferenceSession.create(
-        modelConfig.modelPath,
-        ortOptions
-      );
-    } catch (modelError) {
-      console.error(
-        `Worker ${workerId} - Failed to load model from path:`,
-        modelError
-      );
+    // Load the model with CORS handling and fallback URLs
+    let modelData;
+    let lastError;
 
-      // If local path fails, try to load from URL if provided in params
-      if (params.modelUrl) {
-        try {
+    // Try primary model path first
+    const urlsToTry = [modelConfig.modelPath, ...modelConfig.fallbackUrls];
+
+    // Add custom URL from params if provided
+    if (params.modelUrl && !urlsToTry.includes(params.modelUrl)) {
+      urlsToTry.splice(1, 0, params.modelUrl); // Insert after primary URL
+    }
+
+    for (let i = 0; i < urlsToTry.length; i++) {
+      const currentUrl = urlsToTry[i];
+
+      try {
+        postMessage({
+          status: "downloading",
+          message: `Trying to load model from URL ${i + 1}/${
+            urlsToTry.length
+          }: ${currentUrl.split("/").pop()}`,
+        });
+
+        modelData = await loadModelWithCORS(currentUrl);
+
+        postMessage({
+          status: "loading",
+          message: "Creating ONNX session...",
+        });
+
+        session = await onnx.InferenceSession.create(modelData, ortOptions);
+
+        // If we get here, the model loaded successfully
+        postMessage({
+          status: "loaded",
+          message: `Model loaded successfully from: ${currentUrl
+            .split("/")
+            .pop()}`,
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn(
+          `Worker ${workerId} - Failed to load model from ${currentUrl}:`,
+          error.message
+        );
+
+        // If this isn't the last URL, continue to next one
+        if (i < urlsToTry.length - 1) {
           postMessage({
             status: "retrying",
-            message: "Trying to load model from URL",
+            message: `Failed to load from ${currentUrl
+              .split("/")
+              .pop()}, trying next URL...`,
           });
-          session = await onnx.InferenceSession.create(
-            params.modelUrl,
-            ortOptions
-          );
-        } catch (urlError) {
-          throw new Error(
-            `Failed to load model from both path and URL: ${urlError.message}`
-          );
         }
-      } else {
-        throw modelError;
       }
+    }
+
+    // If we get here and session is still null, all URLs failed
+    if (!session) {
+      throw new Error(
+        `Failed to load model from all ${urlsToTry.length} URLs. Last error: ${
+          lastError?.message || "Unknown error"
+        }`
+      );
     }
 
     initialized = true;
@@ -79,7 +182,8 @@ async function initializeModel(params) {
     postMessage({
       status: "error",
       error: error.message,
-      details: "Check if the model file exists and is accessible.",
+      details:
+        "Check if the model file exists and is accessible. CORS issues may prevent loading from external URLs.",
     });
     return { success: false, error: error.message, workerId };
   }
@@ -117,7 +221,7 @@ function preprocess(imageData, width, height) {
   const tensor = new Float32Array(
     modelConfig.inputShape.reduce((a, b) => a * b, 1)
   );
-  const [N, C, H, W] = modelConfig.inputShape;
+  const [, C, H, W] = modelConfig.inputShape;
 
   for (let h = 0; h < H; h++) {
     for (let w = 0; w < W; w++) {
